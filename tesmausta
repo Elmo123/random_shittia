@@ -1,0 +1,111 @@
+import socket
+from socket import AF_INET, SOCK_STREAM, SO_REUSEADDR, SOL_SOCKET, SHUT_RDWR
+import sys
+import ssl
+import os
+import numpy as np
+import cv2
+import time
+import imutils
+import argparse
+import threading
+import pickle
+import struct
+
+from fps_check import FPS
+from threading_frames import WebcamVideoStream
+from OpenSSL import crypto, SSL
+from urllib2 import urlopen
+
+HOST = '0.0.0.0' 
+PORT = 8080
+ 
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+print 'socket created'
+ 
+#Bind socket to Host and Port
+try:
+    s.bind((HOST, PORT))
+except socket.error as err:
+    print 'Bind Failed, Error Code: ' + str(err[0]) + ', Message: ' + err[1]
+    sys.exit()
+ 
+print 'Socket Bind Success!'
+
+s.listen(1)
+print 'Socket is now listening'
+
+#Capture video
+def set_timer_and_capture_video(conn):
+    thread_stopp = threading.Event()
+    threadi = threading.Thread(target=use_threaded_frames, args=(conn, thread_stopp))
+    threadi.start()
+    time.sleep(7)
+    thread_stopp.set()
+
+def use_threaded_frames(conn, stop_event):
+    print("[INFO] sampling THREADED frames from webcam...")
+    vs = WebcamVideoStream(src=0).start()
+    #fps = FPS().start()
+    fourcc=cv2.VideoWriter_fourcc(*'XVID')
+    #SET CORRECT FPS FOR SAVING!!!
+    out =  cv2.VideoWriter('output.avi', fourcc, 28.0, (640,480))
+    # loop over some frames...this time using the threaded stream
+
+    count = 0
+    
+    while not stop_event.is_set():
+        # grab the frame from the threaded video stream and resize it
+        # to have a maximum width of 400 pixels
+        frame=vs.read()
+        frame = imutils.resize(frame, width=400)
+        data=pickle.dumps(frame)
+
+        conn.sendall(struct.pack("L", len(data))+data)
+
+        cv2.imwrite("frame%d.jpg" % count, frame)     # save frame as JPEG file 
+        conn.send("frame0.jpg")
+        count += 1
+        
+                # save frames into file
+                ##lisaa save option
+
+            # update the FPS counter
+        #fps.update()
+    conn.close()
+    # stop the timer and display FPS information
+    #fps.stop()
+    #print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+    #print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+
+    # do a bit of cleanup
+    cv2.destroyAllWindows()
+    vs.stop()
+
+def get_options_from_client(connection):
+    while True:
+        buf = connection.recv(64)
+        print (buf)
+        if buf=="send_video":
+            print("sending video")
+            set_timer_and_capture_video(connection)
+            connection.close()
+            break
+
+if __name__=='__main__':
+    print("success")
+
+    s.listen(1)
+    s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    #context=ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+
+    while 1:
+        try:
+            #conn, addr = s_ssl.accept()
+            conn,addr=s.accept()
+            print("connected with: " + addr[0] + ":" + str(addr[1]))
+            get_options_from_client(conn)
+
+        except socket.error as e:
+            print('error: {0}'.format(e))
